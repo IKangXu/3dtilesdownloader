@@ -10,6 +10,7 @@ import getopt
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
+from urllib.parse import urljoin
 # from urllib   import urlretrieve
 import codecs
 import socket
@@ -20,7 +21,10 @@ import gzip
 import sys
 import _thread
 import time
+import brotli
+import zlib
 from io import StringIO
+from io import BytesIO
 
 sys.setrecursionlimit(1000000000)
 
@@ -53,6 +57,7 @@ def getContents(contents, n, savedir, baseurl, parent):
                     os.makedirs(dirname)
 
                 uu = urlparse(baseurl)
+                
                 url = baseurl + u + '?' + uu.query
 
                 # 解析
@@ -75,18 +80,36 @@ def getContents(contents, n, savedir, baseurl, parent):
 
 def gzdecode(data):
     # with patch_gzip_for_partial():
-    compressedStream = StringIO(data)
+    compressedStream = BytesIO(data)
     gziper = gzip.GzipFile(fileobj=compressedStream)
     data2 = gziper.read()
 
     # print len(data)
     return data2
+def deflate(data):
+    try:
+        return zlib.decompress(data, -zlib.MAX_WBITS)
+    except zlib.error:
+        return zlib.decompress(data)
 
 
 def readContent(url):
     try:
+        if url.find('..') != -1:
+            url = urljoin(
+                url[0:(url.index('..'))], 
+                url[url.index('..'):len(url)]
+            )
+        print('url: '+url)
         response = urllib.request.urlopen(url)
         html_bytes = response.read()
+        encoding = response.info().get('Content-Encoding')
+        if encoding == 'gzip':
+           html_bytes = gzdecode(html_bytes)
+        elif encoding == 'deflate':
+           html_bytes = deflate(html_bytes)
+        elif encoding == 'br':
+           html_bytes == brotli.decompress(html_bytes)
         return json.loads(html_bytes)
     except urllib.error.ContentTooShortError:
         print('Network conditions is not good.Reloading.')
@@ -101,17 +124,33 @@ def readContent(url):
         traceback.print_exc()
     return {}
 
-
 def autoDownLoad(url, add):
     try:
         # a表示地址， b表示返回头
+        print(url)
         a, b = urllib.request.urlretrieve(url, add)
         keyMap = dict(b)
-        if 'content-encoding' in keyMap and keyMap['content-encoding'] == 'gzip':
+        if 'Content-Encoding' in keyMap and keyMap['Content-Encoding'] == 'gzip':
             # print 'need2be decode'
             objectFile = open(add, 'rb+')  # 以读写模式打开
             data = objectFile.read()
             data = gzdecode(data)
+            objectFile.seek(0, 0)
+            objectFile.write(data)
+            objectFile.close()
+        elif 'Content-Encoding' in keyMap and keyMap['Content-Encoding'] == 'deflate':
+            # print 'need2be decode'
+            objectFile = open(add, 'rb+')  # 以读写模式打开
+            data = objectFile.read()
+            data = deflate(data) # gzdecode(data)
+            objectFile.seek(0, 0)
+            objectFile.write(data)
+            objectFile.close()
+        elif 'Content-Encoding' in keyMap and keyMap['Content-Encoding'] == 'br':
+            # print 'need2be decode'
+            objectFile = open(add, 'rb+')  # 以读写模式打开
+            data = objectFile.read()
+            data = brotli.decompress(data)
             objectFile.seek(0, 0)
             objectFile.write(data)
             objectFile.close()
@@ -141,8 +180,15 @@ def downloadByThreads(contents, start, end, savedir, baseurl, uu):
         dirname = os.path.dirname(file)
         if not os.path.exists(dirname):
             os.makedirs(dirname)
-
+           
         url = baseurl + c + '?' + uu.query
+        
+        if url.find('..') != -1:
+            url = urljoin(
+                url[0:(url.index('..'))], 
+                url[url.index('..'):len(url)]
+            )
+            
         if autoDownLoad(url, file):
             print(c + ' download success: ' + str(i + 1) + '/' + str(len(contents)) + '  start:' + str(
                 start) + ';end:' + str(end))
@@ -235,15 +281,20 @@ if __name__ == "__main__":
     # 解析url
 
     tileseturl = uu.scheme + "://" + uu.netloc + uu.path
-    if not tileseturl.endswith('tileset.json'):
+    if not tileseturl.endswith('.json'):
         tileseturl += '/tileset.json'
 
-    baseurl = tileseturl[0:tileseturl.find('tileset.json')]
+    baseurl = tileseturl[0:(tileseturl.rindex('/')+1)]
     # print baseurl
     # sys.exit(2)
-
     tileseturl += '?' + uu.query
 
+    if tileseturl.find('..') != -1:
+        tileseturl = urljoin(
+                tileseturl[0:(tileseturl.index('..'))], 
+                tileseturl[tileseturl.index('..'):len(tileseturl)]
+            )
+            
     print(tileseturl)
 
     opener = urllib.request.build_opener()
