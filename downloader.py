@@ -67,7 +67,10 @@ def getContents(contents, n, savedir, baseurl, parent):
                     tile = readContent(url)
                 except Exception as e:
                     print(e)
-                getContents(contents, tile['root'], savedir, baseurl, u)
+                try:
+                    getContents(contents, tile['root'], savedir, baseurl, u)
+                except Exception as e:
+                    print('')
 
     if 'children' in n:
         children = n['children']
@@ -114,6 +117,11 @@ def readContent(url):
     except urllib.error.ContentTooShortError:
         print('Network conditions is not good.Reloading.')
         readContent(url)
+    except urllib.error.HTTPError as err:
+        if err.code == 404: 
+            raise RuntimeError('文件没有找到：' + url)  
+        else: 
+            raise 
     except socket.timeout:
         print('fetch ', url, ' exceedTime ')
         try:
@@ -233,11 +241,12 @@ if __name__ == "__main__":
     start = 0
     end = 0
     threads = 1
+    referer = ''
 
     startTime = time.time()
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hu:d:s:e:t:", ["url=", "dir=", "start=", "end=", "threads=", "help"])
+        opts, args = getopt.getopt(sys.argv[1:], "hu:d:s:e:t:r:", ["url=", "dir=", "start=", "end=", "threads=", "referer=", "help"])
     except getopt.GetoptError:
         print('param error')
         pause()
@@ -257,6 +266,8 @@ if __name__ == "__main__":
             end = int(arg)
         elif opt in ("-t", "--threads"):
             threads = int(arg)
+        elif opt in ("-r", "--referer"):
+            referer = arg 
 
     if baseurl == '':
         print('please input url param or use --help to see how to use it')
@@ -301,7 +312,7 @@ if __name__ == "__main__":
     opener.addheaders = [
         ('User-Agent',
          'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/36.0.1941.0 Safari/537.36'),
-        ('Referer', 'http://cesium.marsgis.cn/')
+        ('referer', referer)
     ]
     urllib.request.install_opener(opener)
 
@@ -323,6 +334,7 @@ if __name__ == "__main__":
         print(e)
 
     contents = []
+
     getContents(contents, tileset['root'], savedir, baseurl, None)
 
     print("解析总耗时：", str(time.time() - startTime), 's')
